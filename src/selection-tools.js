@@ -59,7 +59,8 @@ const tools = {
         label: _('Translate'),
         uri: 'foliate-selection-tool:///selection-tools/translate.html',
         run: (popover, { text }) => {
-            const [langs, defaultLang] = getGoogleTranslateLanguages()
+            const [langs] = getGoogleTranslateLanguages()
+            const defaultLang = 'tr'
             return {
                 msg: {
                     footer: _('Translation by Google Translate'),
@@ -156,5 +157,16 @@ export const SelectionPopover = GObject.registerClass({
             group.add_action(action)
             section.append(tool.label, `selection-tools.${name}`)
         }
+
+        const keys = { t: 'translate', d: 'dictionary' }
+        const keyController = new Gtk.EventControllerKey()
+        keyController.connect('key-pressed', (_, keyval) => {
+            const name = keys[Gdk.keyval_name(keyval)]
+            if (!name) return false
+            this.popdown()
+            group.activate_action(name, null)
+            return true
+        })
+        this.add_controller(keyController)
     }
 })

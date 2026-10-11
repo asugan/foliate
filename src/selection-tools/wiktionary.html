@@ -3,7 +3,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <link href="common.css" rel="stylesheet">
-<base href="https://en.wiktionary.org/wiki/Wiktionary:Main_Page">
+<base href="https://tr.wiktionary.org/wiki/Ana_Sayfa">
 <style>
 ul {
     margin: .5em 0;
@@ -27,53 +27,63 @@ hgroup p {
 let msgError, msgErrorAction
 const main = document.querySelector('main')
 const footer = document.querySelector('footer')
-const wiktionary = (word, language, languageName) => {
+
+const translateToTurkish = text =>
+    fetch('https://translate.googleapis.com/translate_a/single?client=gtx'
+    + '&ie=UTF-8&oe=UTF-8&sl=auto&tl=tr&dt=t&q=' + encodeURIComponent(text))
+        .then(res => res.ok ? res.json() : Promise.reject(new Error()))
+        .then(json => json[0].map(x => x[0]).join(''))
+
+// tr.wiktionary has no REST definition endpoint,
+// so take the "Türkçe" section of the parsed page and keep only the definition lists
+const wiktionary = word => {
     document.body.dataset.state = 'loading'
-    return fetch(`https://en.wiktionary.org/api/rest_v1/page/definition/${word}`)
+    return fetch('https://tr.wiktionary.org/w/api.php?action=parse&format=json'
+    + '&formatversion=2&prop=text&disableeditsection=1&redirects=1&origin=*'
+    + '&page=' + encodeURIComponent(word))
         .then(res => res.ok ? res.json() : Promise.reject(new Error()))
         .then(json => {
-            const results = language ? json[language]
-                : languageName ? Object.values(json)
-                    .find(x => x.some(x => x.language === languageName))
-                : json['en']
+            if (json.error) throw new Error(json.error.info)
+            const doc = new DOMParser().parseFromString(json.parse.text, 'text/html')
+            const h2 = doc.getElementById('Türkçe')
+            if (!h2) throw new Error('No Turkish section')
             const hgroup = document.createElement('hgroup')
             const h1 = document.createElement('h1')
             h1.innerText = word
             const p = document.createElement('p')
-            p.innerText = results[0].language
+            p.innerText = 'Türkçe'
             hgroup.append(h1, p)
-            main.append(hgroup)
-            for (const { partOfSpeech, definitions } of results) {
-                const h2 = document.createElement('h2')
-                h2.innerText = partOfSpeech
-                const ol = document.createElement('ol')
-                main.append(h2, ol)
-                for (const { definition, examples } of definitions) {
-                    const li = document.createElement('li')
-                    li.innerHTML = definition
-                    ol.append(li)
-                    const ul = document.createElement('ul')
-                    li.append(ul)
-                    if (examples) for (const example of examples) {
-                        const li = document.createElement('li')
-                        li.innerHTML = example
-                        ul.append(li)
+            const sections = []
+            let heading
+            for (let el = h2.closest('.mw-heading')?.nextElementSibling ?? h2.nextElementSibling;
+                el && !el.classList.contains('mw-heading2') && el.tagName !== 'H2';
+                el = el.nextElementSibling) {
+                if (el.classList.contains('mw-heading')) heading = el.textContent
+                else if (el.tagName === 'OL') {
+                    if (heading) {
+                        const h2 = document.createElement('h2')
+                        h2.innerText = heading
+                        sections.push(h2)
+                        heading = null
                     }
+                    sections.push(el)
                 }
             }
+            if (!sections.length) throw new Error('No definitions')
+            main.append(hgroup, ...sections)
             document.querySelector('#link').href = '/wiki/' + word
             document.body.dataset.state = 'loaded'
         })
         .catch(e => {
             console.error(e)
-            const lower = word.toLocaleLowerCase(language)
-            if (lower !== word) return wiktionary(lower, language)
+            const lower = word.toLocaleLowerCase('tr')
+            if (lower !== word) return wiktionary(lower)
             else {
                 const div = document.createElement('div')
                 const h1 = document.createElement('h1')
                 h1.innerText = msgError
                 const p = document.createElement('p')
-                p.innerHTML = `<a href="https://en.wiktionary.org/w/index.php?search=${encodeURIComponent(word)}">${msgErrorAction}</a>`
+                p.innerHTML = `<a href="https://tr.wiktionary.org/w/index.php?search=${encodeURIComponent(word)}">${msgErrorAction}</a>`
                 div.append(h1, p)
                 main.append(div)
                 document.body.dataset.state = 'error'
@@ -81,25 +91,17 @@ const wiktionary = (word, language, languageName) => {
         })
 }
 
-// see https://en.wiktionary.org/wiki/Wiktionary:Namespace
-const wikiNamespaces = [
-    'Media', 'Special', 'Talk', 'User', 'Wiktionary', 'File', 'MediaWiki',
-    'Template', 'Help', 'Category',
-    'Summary', 'Appendix', 'Concordance', 'Index', 'Rhymes', 'Transwiki',
-    'Thesaurus', 'Citations', 'Sign',
-]
-
 main.addEventListener('click', e => {
     const { target } = e
     if (target.tagName === 'A') {
         const href = target.getAttribute('href')
         if (href.startsWith('/wiki/')) {
-            const [word, languageName] = href.replace('/wiki/', '').split('#')
-            if (wikiNamespaces.every(namespace => !word.startsWith(namespace + ':')
-            && !word.startsWith(namespace + '_talk:'))) {
+            const [word] = decodeURIComponent(href.replace('/wiki/', '')).split('#')
+            // skip namespaced pages (Vikisözlük:, Ek:, Kategori:, ...)
+            if (!word.includes(':')) {
                 e.preventDefault()
                 main.replaceChildren()
-                wiktionary(word.replaceAll('_', ' '), null, languageName)
+                wiktionary(word.replaceAll('_', ' '))
             }
         }
     }
@@ -109,6 +111,8 @@ globalThis.init = ({ msg, text, lang }) => {
     document.querySelector('footer').innerHTML = msg.footer
     msgError = msg.error
     msgErrorAction = msg.errorAction
-    wiktionary(text, lang)
+    translateToTurkish(text)
+        .catch(e => (console.error(e), text))
+        .then(word => wiktionary(word.trim()))
 }
 </script>
